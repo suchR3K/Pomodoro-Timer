@@ -1,0 +1,15 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const T = require('../public/timer.js');
+test('default work session lasts 25 minutes', () => { const s = T.create(); assert.equal(s.remaining, 1500000); assert.equal(s.mode, 'work'); });
+test('start does not restart a running timer', () => { const s = T.create(); T.start(s,1000); T.start(s,5000); assert.equal(s.deadline,1501000); });
+test('pause and resume preserve remaining time', () => { const s = T.create(); T.start(s,1000); T.pause(s,11000); assert.equal(s.remaining,1490000); T.start(s,20000); assert.equal(s.deadline,1510000); });
+test('early tick does not complete a session', () => { const s = T.create(); T.start(s,1); assert.equal(T.tick(s,500),null); assert.equal(s.completed,0); });
+test('finish counts once and waits at a short break', () => { const s = T.create(); T.start(s,1); assert.equal(T.tick(s,1500001),'work'); assert.equal(s.completed,1); assert.equal(s.mode,'short'); assert.equal(s.deadline,null); assert.equal(T.tick(s,99999999),null); assert.equal(s.completed,1); });
+test('every fourth work session gets a long break, including second cycle', () => { const s=T.create({work:1,short:1,long:2}); let now=1; for(let n=1;n<=8;n++){T.start(s,now); now+=60000; T.tick(s,now); assert.equal(s.mode,n%4===0?'long':'short'); assert.equal(s.completed,n); const duration=s.remaining; T.start(s,now); now+=duration; T.tick(s,now); assert.equal(s.mode,'work'); assert.equal(s.completed,n);} });
+test('reset keeps completed count', () => { const s=T.create(); s.completed=3; T.start(s,1); T.reset(s); assert.equal(s.completed,3); assert.equal(s.deadline,null); assert.equal(s.remaining,1500000); });
+test('long absence completes only the current session', () => { const s=T.create(); T.start(s,1); T.tick(s,999999999); assert.equal(s.completed,1); assert.equal(s.mode,'short'); });
+test('custom durations validate range and integer values', () => { for(const work of [0,121,1.5,NaN,'25']) assert.throws(()=>T.create({work,short:5,long:15})); assert.equal(T.create({work:1,short:120,long:15}).remaining,60000); });
+test('saved running timer restores and catches up', () => { const s=T.create(); T.start(s,1000); const restored=T.restore(JSON.stringify(s),1600000); assert.equal(T.tick(restored,1600000),'work'); assert.equal(restored.completed,1); });
+test('corrupt storage falls back safely', () => { for(const value of ['bad','null','{}',JSON.stringify({...T.create(),completed:-1}),JSON.stringify({...T.create(),remaining:-1})]) assert.deepEqual(T.restore(value,1000),T.create()); });
+test('pause at deadline completes rather than losing a session', () => { const s=T.create(); T.start(s,1); assert.equal(T.pause(s,1500001),'work'); assert.equal(s.mode,'short'); assert.equal(s.remaining,300000); });
